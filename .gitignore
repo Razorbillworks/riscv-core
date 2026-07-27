@@ -1,0 +1,3 @@
+sim_*
+*.vcd
+program.hex
