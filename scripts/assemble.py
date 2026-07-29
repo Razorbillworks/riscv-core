@@ -48,21 +48,7 @@ def jal(rd, imm):       return j_type(imm, rd, 0b1101111)
 if __name__ == "__main__":
     import sys
 
-    # Test program (addresses shown for reference, each instr = 4 bytes):
-    # 0x00: addi x1, x0, 5      ; x1 = 5
-    # 0x04: addi x2, x0, 3      ; x2 = 3
-    # 0x08: add  x3, x1, x2     ; x3 = 8
-    # 0x0C: sub  x4, x1, x2     ; x4 = 2
-    # 0x10: sw   x3, 0(x0)      ; mem[0] = 8
-    # 0x14: lw   x5, 0(x0)      ; x5 = 8
-    # 0x18: beq  x1, x1, 8      ; always taken (x1==x1), skip next instr -> pc becomes 0x24
-    # 0x1C: addi x6, x0, 99     ; SKIPPED (should never execute)
-    # 0x20: addi x6, x0, 99     ; SKIPPED (padding, branch target math below accounts for this)
-    # 0x24: addi x7, x0, 7      ; x7 = 7  <- branch lands here
-    # 0x28: and  x8, x1, x2     ; x8 = 5 & 3 = 1
-    # 0x2C: or   x9, x1, x2     ; x9 = 5 | 3 = 7
-    # 0x30: slt  x10, x2, x1    ; x10 = (3 < 5) = 1
-
+    # ORIGINAL test program (kept for regression against single-cycle CPU).
     program = [
         addi(1, 0, 5),
         addi(2, 0, 3),
@@ -70,20 +56,38 @@ if __name__ == "__main__":
         sub(4, 1, 2),
         sw(3, 0, 0),
         lw(5, 0, 0),
-        beq(1, 1, 8),       # if taken, pc = 0x18 + 8 = 0x20 -> skips ONE instruction (the addi at 0x1C)
-        addi(6, 0, 99),     # should be skipped
-        addi(7, 0, 7),      # branch target lands here (0x20)
+        beq(1, 1, 8),
+        addi(6, 0, 99),
+        addi(7, 0, 7),
         and_(8, 1, 2),
         or_(9, 1, 2),
         slt(10, 2, 1),
     ]
 
+    # HAZARD-EXPOSING test program: back-to-back dependent instructions,
+    # deliberately no spacing, to genuinely trigger the data hazard bug in
+    # the pipelined CPU (rather than accidentally working due to spacing).
+    #
+    # x1 = 10
+    # x2 = x1 + x1        <- depends on x1, IMMEDIATELY after it's set
+    # x3 = x2 + x2        <- depends on x2, IMMEDIATELY after it's set
+    # x4 = x3 + x3        <- depends on x3, IMMEDIATELY after it's set
+    # Expected (correct): x1=10, x2=20, x3=40, x4=80
+    hazard_program = [
+        addi(1, 0, 10),
+        add(2, 1, 1),   # x2 = x1 + x1
+        add(3, 2, 2),   # x3 = x2 + x2
+        add(4, 3, 3),   # x4 = x3 + x3
+    ]
+
+    which = sys.argv[2] if len(sys.argv) > 2 else "original"
+    program_to_use = hazard_program if which == "hazard" else program
+
     out_path = sys.argv[1] if len(sys.argv) > 1 else "program.hex"
     with open(out_path, "w") as f:
-        for instr in program:
+        for instr in program_to_use:
             f.write(f"{instr:08x}\n")
-        # pad remaining memory with NOPs (addi x0,x0,0) so imem doesn't read garbage
-        for _ in range(256 - len(program)):
+        for _ in range(256 - len(program_to_use)):
             f.write("00000013\n")  # addi x0, x0, 0 = NOP
 
-    print(f"Wrote {len(program)} instructions to {out_path}")
+    print(f"Wrote {len(program_to_use)} instructions to {out_path} (variant: {which})")
