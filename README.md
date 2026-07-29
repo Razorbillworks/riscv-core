@@ -1,7 +1,7 @@
 # riscv-core
 
 A RISC-V CPU built in Verilog, going from a single-cycle datapath to a
-5-stage pipeline, with a focus on branch prediction — comparing a classical
+5-stage pipeline, with a focus on branch prediction - comparing a classical
 predictor (gshare) against a perceptron-based predictor, both implemented
 as synthesizable RTL, with real gate-count/timing numbers from synthesis
 (Yosys).
@@ -25,12 +25,18 @@ predictor actually cost in gates and timing."
       and, or, slt, addi, lw, sw, beq, jal)
 - [x] Data memory
 - [x] Single-cycle CPU — wired end-to-end, verified against a test program
-- [ ] 5-stage pipeline conversion
+- [x] 5-stage pipeline conversion
 - [ ] Hazard detection + stalling
 - [ ] Forwarding
 - [ ] Gshare branch predictor (RTL)
 - [ ] Perceptron branch predictor (RTL)
-- [ ] Synthesis + gate count / timing comparison
+- [ ] Synthesis + gate count/timing comparison
+
+Note: the pipeline is structurally complete but does not yet handle data
+   or control hazards correctly — dependent instructions can read stale
+   register values, and branches don't flush wrong-path fetches yet. This
+   is being fixed next (forwarding + flush logic). See commit history for
+   the bug being demonstrated deliberately.
 
 ## Instruction subset
 
