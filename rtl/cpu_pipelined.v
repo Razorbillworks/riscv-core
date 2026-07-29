@@ -110,12 +110,39 @@ module cpu_pipelined (
     // =========================================================
     // EX stage
     // =========================================================
-    wire [31:0] ex_alu_operand_b = ex_alu_src ? ex_imm : ex_rs2_data;
+
+    // --- Forwarding ---
+    // Check whether the values we need (ex_rs1_data / ex_rs2_data, latched
+    // from the register file back in ID) are actually STALE — i.e. an
+    // instruction ahead of us in EX/MEM or MEM/WB is about to write the
+    // same register we need, but hasn't reached the register file yet.
+    wire [1:0] forward_a, forward_b;
+
+    forwarding_unit forwarding_unit_inst (
+        .ex_rs1_addr(ex_rs1_addr), .ex_rs2_addr(ex_rs2_addr),
+        .mem_rd_addr(mem_rd_addr), .mem_reg_write(mem_reg_write),
+        .wb_rd_addr(wb_rd_addr), .wb_reg_write(wb_reg_write),
+        .forward_a(forward_a), .forward_b(forward_b)
+    );
+
+    // Mux: pick the ACTUAL value to feed the ALU, based on forwarding_unit's
+    // decision. 2'b10 = take from EX/MEM (mem_alu_result), 2'b01 = take
+    // from MEM/WB (wb_write_back_data, already muxed for us below), 2'b00 =
+    // no hazard, use the value latched from the register file.
+    wire [31:0] ex_rs1_data_fwd = (forward_a == 2'b10) ? mem_alu_result :
+                                  (forward_a == 2'b01) ? wb_write_back_data :
+                                                          ex_rs1_data;
+    wire [31:0] ex_rs2_data_fwd = (forward_b == 2'b10) ? mem_alu_result :
+                                  (forward_b == 2'b01) ? wb_write_back_data :
+                                                          ex_rs2_data;
+
+    wire [31:0] ex_alu_operand_a = ex_rs1_data_fwd;
+    wire [31:0] ex_alu_operand_b = ex_alu_src ? ex_imm : ex_rs2_data_fwd;
     wire [31:0] ex_alu_result;
     wire        ex_alu_zero;
 
     alu alu_inst (
-        .a(ex_rs1_data),
+        .a(ex_alu_operand_a),
         .b(ex_alu_operand_b),
         .alu_ctrl(ex_alu_ctrl),
         .result(ex_alu_result),
@@ -127,9 +154,16 @@ module cpu_pipelined (
     wire [31:0] ex_branch_target = ex_pc + ex_imm;
 
     // This feeds back to the PC mux in IF stage (declared as ex_next_pc above).
+    // IMPORTANT: the default (non-branch/jump) case must use the CURRENT
+    // fetch-stage PC+4 (if_pc_plus_4), not ex_pc+4. ex_pc is a delayed copy
+    // (2 cycles old, latched back in ID/EX) — using it as the default would
+    // make PC advance at the wrong rate and desync the whole pipeline. It's
+    // only correct to use EX's own PC when EX is actively overriding fetch
+    // with a branch/jump target, since that recovery IS relative to where
+    // that specific branch instruction was fetched from.
     assign ex_next_pc = ex_jump          ? ex_branch_target :
                         ex_branch_taken  ? ex_branch_target :
-                                           ex_pc_plus_4;
+                                           if_pc_plus_4;
 
     // NOTE: because branch/jump resolution happens in EX (2 stages after
     // fetch), the instructions fetched in the meantime (while the branch
