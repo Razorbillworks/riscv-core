@@ -31,6 +31,7 @@ predictor actually cost in gates and timing."
 - [ ] Gshare branch predictor (RTL)
 - [ ] Perceptron branch predictor (RTL)
 - [ ] Synthesis + gate count/timing comparison
+
 Note: the pipeline is structurally complete but does not yet handle data
    or control hazards correctly — dependent instructions can read stale
    register values, and branches don't flush wrong-path fetches yet. This
