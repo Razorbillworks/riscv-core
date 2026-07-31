@@ -31,10 +31,14 @@ module cpu_pipelined (
     // fed back here. For now (no hazard handling), we just always fetch
     // sequentially unless EX says otherwise.
     wire [31:0] ex_next_pc; // driven from EX stage further down
+    wire        stall;      // driven from hazard detection unit further down
+    wire        flush;      // driven from EX stage: branch/jump resolved taken
 
     always @(posedge clk or posedge rst) begin
         if (rst)
             pc <= 32'd0;
+        else if (stall)
+            pc <= pc; // freeze: hold current PC, don't fetch a new instruction
         else
             pc <= ex_next_pc;
     end
@@ -45,7 +49,7 @@ module cpu_pipelined (
     wire [31:0] id_pc, id_instr;
 
     if_id_reg if_id (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .stall(stall), .flush(flush),
         .pc_in(pc), .instr_in(if_instr),
         .pc_out(id_pc), .instr_out(id_instr)
     );
@@ -81,6 +85,18 @@ module cpu_pipelined (
         .rs1_data(id_rs1_data), .rs2_data(id_rs2_data)
     );
 
+    // --- Load-use hazard detection ---
+    // Checks the instruction currently sitting in ID/EX (i.e. what EX is
+    // about to work on) against what ID needs right now. If EX holds a
+    // load whose destination matches something ID needs, we must stall.
+    hazard_detection_unit hazard_detection_inst (
+        .ex_mem_read(ex_mem_read),
+        .ex_rd_addr(ex_rd_addr),
+        .id_rs1_addr(id_rs1_addr),
+        .id_rs2_addr(id_rs2_addr),
+        .stall(stall)
+    );
+
     // =========================================================
     // ID/EX pipeline register
     // =========================================================
@@ -91,7 +107,7 @@ module cpu_pipelined (
                 ex_mem_to_reg, ex_branch, ex_jump;
 
     id_ex_reg id_ex (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .stall(stall), .flush(flush),
         .pc_in(id_pc), .rs1_data_in(id_rs1_data), .rs2_data_in(id_rs2_data),
         .imm_in(id_imm), .rs1_addr_in(id_rs1_addr), .rs2_addr_in(id_rs2_addr),
         .rd_addr_in(id_rd_addr),
@@ -153,6 +169,12 @@ module cpu_pipelined (
     wire        ex_branch_taken = ex_branch & ex_alu_zero;
     wire [31:0] ex_branch_target = ex_pc + ex_imm;
 
+    // flush: whenever EX just determined a branch/jump should be taken,
+    // the 2 instructions already fetched behind it (currently sitting in
+    // IF/ID and ID/EX) are on the WRONG path and must be discarded before
+    // they can write any register or memory.
+    assign flush = ex_jump | ex_branch_taken;
+
     // This feeds back to the PC mux in IF stage (declared as ex_next_pc above).
     // IMPORTANT: the default (non-branch/jump) case must use the CURRENT
     // fetch-stage PC+4 (if_pc_plus_4), not ex_pc+4. ex_pc is a delayed copy
@@ -181,7 +203,7 @@ module cpu_pipelined (
 
     ex_mem_reg ex_mem (
         .clk(clk), .rst(rst),
-        .alu_result_in(ex_alu_result), .rs2_data_in(ex_rs2_data),
+        .alu_result_in(ex_alu_result), .rs2_data_in(ex_rs2_data_fwd),
         .rd_addr_in(ex_rd_addr), .pc_plus_4_in(ex_pc_plus_4),
         .reg_write_in(ex_reg_write), .mem_read_in(ex_mem_read),
         .mem_write_in(ex_mem_write), .mem_to_reg_in(ex_mem_to_reg), .jump_in(ex_jump),

@@ -80,8 +80,29 @@ if __name__ == "__main__":
         add(4, 3, 3),   # x4 = x3 + x3
     ]
 
+    # LOAD-USE hazard test: a load immediately followed by a dependent
+    # instruction. Forwarding alone cannot fix this (data isn't ready
+    # until MEM completes) — this specifically tests the stall logic.
+    #
+    # x1 = 99
+    # sw x1, 0(x0)        ; mem[0] = 99
+    # lw x2, 0(x0)        ; x2 = 99 (load)
+    # add x3, x2, x2       ; x3 = 198 -- immediately depends on x2, the load
+    # Expected (correct): x1=99, x2=99, x3=198
+    loaduse_program = [
+        addi(1, 0, 99),
+        sw(1, 0, 0),
+        lw(2, 0, 0),
+        add(3, 2, 2),   # immediately depends on lw's result
+    ]
+
     which = sys.argv[2] if len(sys.argv) > 2 else "original"
-    program_to_use = hazard_program if which == "hazard" else program
+    if which == "hazard":
+        program_to_use = hazard_program
+    elif which == "loaduse":
+        program_to_use = loaduse_program
+    else:
+        program_to_use = program
 
     out_path = sys.argv[1] if len(sys.argv) > 1 else "program.hex"
     with open(out_path, "w") as f:

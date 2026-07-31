@@ -28,13 +28,24 @@ module regfile (
             regs[i] = 32'd0;
     end
 
-    // --- Reads are combinational ---
-    // No clock involved: as soon as rs1_addr/rs2_addr change, the output
-    // changes immediately (like the ALU). This models real register files,
-    // which are readable asynchronously.
-    // x0 is hardwired to 0 regardless of what's stored, per the RISC-V spec.
-    assign rs1_data = (rs1_addr == 5'd0) ? 32'd0 : regs[rs1_addr];
-    assign rs2_data = (rs2_addr == 5'd0) ? 32'd0 : regs[rs2_addr];
+    // --- Reads are combinational, with a same-cycle write bypass ---
+    // Without this bypass: if an instruction writes register X on the same
+    // clock edge that a later instruction is reading X (which happens
+    // routinely in a pipeline — e.g. an instruction's WB stage lands on
+    // the exact same cycle as a different instruction's ID stage), the
+    // write is non-blocking (<=) and hasn't actually landed in regs[]
+    // yet at the moment the read is evaluated, so the read would return
+    // the OLD, stale value. Real register files commonly solve this with
+    // exactly this kind of "write-first" internal bypass, since making
+    // every instruction wait an extra cycle just for this case would be
+    // wasteful when we can just forward the write data directly.
+    // x0 stays hardwired to 0 regardless.
+    assign rs1_data = (rs1_addr == 5'd0) ? 32'd0 :
+                       (we && rd_addr == rs1_addr) ? rd_data :
+                                                      regs[rs1_addr];
+    assign rs2_data = (rs2_addr == 5'd0) ? 32'd0 :
+                       (we && rd_addr == rs2_addr) ? rd_data :
+                                                      regs[rs2_addr];
 
     // --- Writes are clocked (sequential logic) ---
     // always @(posedge clk) means: run this block once, at the instant the

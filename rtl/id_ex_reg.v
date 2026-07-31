@@ -10,6 +10,8 @@
 module id_ex_reg (
     input         clk,
     input         rst,
+    input         stall,   // load-use hazard: insert bubble (this stage produces nothing useful)
+    input         flush,   // branch resolved taken: clear wrong-path instruction
 
     // data values
     input  [31:0] pc_in,
@@ -62,6 +64,33 @@ module id_ex_reg (
             reg_write_out  <= 1'b0; // critical: on flush/reset, reg_write=0
                                      // means this "instruction" can never
                                      // corrupt the register file
+            mem_read_out   <= 1'b0;
+            mem_write_out  <= 1'b0;
+            mem_to_reg_out <= 1'b0;
+            branch_out     <= 1'b0;
+            jump_out       <= 1'b0;
+        end else if (stall || flush) begin
+            // Both cases insert a "bubble": a fake do-nothing instruction.
+            // stall: the ID-stage instruction can't safely advance yet
+            //   (load-use hazard), so EX gets nothing useful this cycle.
+            // flush: EX just discovered a branch was taken, so whatever
+            //   ID was working on is a wrong-path instruction and must be
+            //   discarded before it can do any damage (e.g. write a
+            //   register or memory).
+            // Only control signals strictly need to be zeroed (data values
+            // don't matter for a bubble since reg_write etc. are all off),
+            // but we clear reg_write specifically as the critical safety
+            // signal — same reasoning as the reset case above.
+            pc_out         <= 32'd0;
+            rs1_data_out   <= 32'd0;
+            rs2_data_out   <= 32'd0;
+            imm_out        <= 32'd0;
+            rs1_addr_out   <= 5'd0;
+            rs2_addr_out   <= 5'd0;
+            rd_addr_out    <= 5'd0;
+            alu_ctrl_out   <= 4'd0;
+            alu_src_out    <= 1'b0;
+            reg_write_out  <= 1'b0;
             mem_read_out   <= 1'b0;
             mem_write_out  <= 1'b0;
             mem_to_reg_out <= 1'b0;

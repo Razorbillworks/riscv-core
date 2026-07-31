@@ -17,6 +17,8 @@
 module if_id_reg (
     input         clk,
     input         rst,
+    input         stall,   // 1 = hold current value, don't accept new input (load-use hazard)
+    input         flush,   // 1 = clear to bubble (wrong-path instruction after branch)
     input  [31:0] pc_in,
     input  [31:0] instr_in,
 
@@ -31,6 +33,17 @@ module if_id_reg (
                                  // decoder's opcodes, so every control signal
                                  // comes out 0 -> this already behaves as a
                                  // safe "do nothing" bubble
+        end else if (flush) begin
+            pc_out    <= 32'd0;
+            instr_out <= 32'd0; // same bubble as reset, just triggered by
+                                 // a mispredicted/resolved branch instead
+        end else if (stall) begin
+            // Hold current value — do NOT latch pc_in/instr_in this cycle.
+            // This is what "freezing" fetch looks like: same instruction
+            // stays visible to ID for an extra cycle while the hazard
+            // upstream resolves.
+            pc_out    <= pc_out;
+            instr_out <= instr_out;
         end else begin
             pc_out    <= pc_in;
             instr_out <= instr_in;
