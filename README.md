@@ -27,16 +27,18 @@ predictor actually cost in gates and timing."
 - [x] Single-cycle CPU — wired end-to-end, verified against a test program
 - [x] 5-stage pipeline conversion
 - [ ] Hazard detection + stalling
-- [ ] Forwarding
+- [x] Forwarding
 - [ ] Gshare branch predictor (RTL)
 - [ ] Perceptron branch predictor (RTL)
 - [ ] Synthesis + gate count/timing comparison
 
-Note: the pipeline is structurally complete but does not yet handle data
-   or control hazards correctly — dependent instructions can read stale
-   register values, and branches don't flush wrong-path fetches yet. This
-   is being fixed next (forwarding + flush logic). See commit history for
-   the bug being demonstrated deliberately.
+Note: forwarding is implemented and fixes the data hazard for
+back-to-back dependent instructions. Two things are still open: the
+load-use hazard (a load immediately followed by a dependent instruction
+needs a stall cycle, since the loaded value isn't available even with
+forwarding) hasn't been tested yet, and branches still don't flush
+wrong-path instructions fetched before the branch resolves. Both are
+being addressed next.
 
 ## Instruction subset
 
