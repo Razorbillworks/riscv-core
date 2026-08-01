@@ -27,20 +27,51 @@ module cpu_pipelined (
 
     wire [31:0] if_pc_plus_4 = pc + 32'd4;
 
+    // --- Branch prediction at fetch time ---
+    // Look up BOTH the target (BTB) and the taken/not-taken guess (gshare)
+    // for the CURRENT fetch pc, simultaneously and combinationally, so a
+    // prediction is available the same cycle we fetch.
+    wire        btb_hit;
+    wire [31:0] btb_predicted_target;
+    wire        gshare_predict_taken;
+
+    btb btb_inst (
+        .clk(clk), .rst(rst),
+        .fetch_pc(pc), .btb_hit(btb_hit), .predicted_target(btb_predicted_target),
+        .update_valid(ex_branch_or_jump_resolved), .update_pc(ex_pc),
+        .update_target(ex_branch_target), .update_taken(ex_actual_taken)
+    );
+
+    gshare_predictor #(.HISTORY_BITS(8)) gshare_inst (
+        .clk(clk), .rst(rst),
+        .pc(pc), .predict_taken(gshare_predict_taken),
+        .update_valid(ex_branch_or_jump_resolved), .update_pc(ex_pc),
+        .actual_taken(ex_actual_taken)
+    );
+
+    // Speculative next-fetch PC: only act on the prediction if BOTH the
+    // BTB has a cached target for this exact PC AND gshare says taken.
+    // Otherwise fall back to ordinary sequential fetch.
+    wire        predict_taken_and_hit = btb_hit && gshare_predict_taken;
+    wire [31:0] speculative_pc = predict_taken_and_hit ? btb_predicted_target : if_pc_plus_4;
+
     // next_pc is computed in EX stage (branch/jump decisions happen there),
     // fed back here. For now (no hazard handling), we just always fetch
     // sequentially unless EX says otherwise.
     wire [31:0] ex_next_pc; // driven from EX stage further down
     wire        stall;      // driven from hazard detection unit further down
-    wire        flush;      // driven from EX stage: branch/jump resolved taken
+    wire        flush;      // driven from EX stage: misprediction recovery
 
     always @(posedge clk or posedge rst) begin
         if (rst)
             pc <= 32'd0;
         else if (stall)
             pc <= pc; // freeze: hold current PC, don't fetch a new instruction
+        else if (flush)
+            pc <= ex_next_pc; // misprediction recovery: EX supplies the CORRECT pc
         else
-            pc <= ex_next_pc;
+            pc <= speculative_pc; // normal case: trust the prediction (right or wrong,
+                                   // EX will catch and correct it if wrong)
     end
 
     // =========================================================
@@ -53,6 +84,23 @@ module cpu_pipelined (
         .pc_in(pc), .instr_in(if_instr),
         .pc_out(id_pc), .instr_out(id_instr)
     );
+
+    // Small dedicated pipeline flops carrying the PREDICTION bit alongside
+    // the main pipeline registers (kept separate rather than modifying
+    // if_id_reg/id_ex_reg's interfaces, since those are already tested
+    // and reused elsewhere — this keeps prediction bookkeeping isolated).
+    // Follows the exact same stall/flush behavior as if_id_reg.
+    reg id_predicted_taken;
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            id_predicted_taken <= 1'b0;
+        else if (flush)
+            id_predicted_taken <= 1'b0;
+        else if (stall)
+            id_predicted_taken <= id_predicted_taken;
+        else
+            id_predicted_taken <= predict_taken_and_hit;
+    end
 
     // =========================================================
     // ID stage
@@ -127,6 +175,19 @@ module cpu_pipelined (
     // EX stage
     // =========================================================
 
+    // Matching ID/EX-stage flop for the prediction bit (see IF/ID version above)
+    reg ex_predicted_taken;
+    always @(posedge clk or posedge rst) begin
+        if (rst)
+            ex_predicted_taken <= 1'b0;
+        else if (flush)
+            ex_predicted_taken <= 1'b0;
+        else if (stall)
+            ex_predicted_taken <= ex_predicted_taken;
+        else
+            ex_predicted_taken <= id_predicted_taken;
+    end
+
     // --- Forwarding ---
     // Check whether the values we need (ex_rs1_data / ex_rs2_data, latched
     // from the register file back in ID) are actually STALE — i.e. an
@@ -169,23 +230,33 @@ module cpu_pipelined (
     wire        ex_branch_taken = ex_branch & ex_alu_zero;
     wire [31:0] ex_branch_target = ex_pc + ex_imm;
 
-    // flush: whenever EX just determined a branch/jump should be taken,
-    // the 2 instructions already fetched behind it (currently sitting in
-    // IF/ID and ID/EX) are on the WRONG path and must be discarded before
-    // they can write any register or memory.
-    assign flush = ex_jump | ex_branch_taken;
+    // The REAL outcome, now that EX has actually computed it — used both
+    // to update the predictors (BTB/gshare) and to check whether our
+    // earlier speculative fetch was correct.
+    wire ex_actual_taken = ex_jump | ex_branch_taken;
 
-    // This feeds back to the PC mux in IF stage (declared as ex_next_pc above).
-    // IMPORTANT: the default (non-branch/jump) case must use the CURRENT
-    // fetch-stage PC+4 (if_pc_plus_4), not ex_pc+4. ex_pc is a delayed copy
-    // (2 cycles old, latched back in ID/EX) — using it as the default would
-    // make PC advance at the wrong rate and desync the whole pipeline. It's
-    // only correct to use EX's own PC when EX is actively overriding fetch
-    // with a branch/jump target, since that recovery IS relative to where
-    // that specific branch instruction was fetched from.
-    assign ex_next_pc = ex_jump          ? ex_branch_target :
-                        ex_branch_taken  ? ex_branch_target :
-                                           if_pc_plus_4;
+    // A branch or jump "resolves" (produces a real, ground-truth outcome
+    // worth learning from) whenever EX is actually processing one.
+    wire ex_branch_or_jump_resolved = ex_branch | ex_jump;
+
+    // Misprediction: what we guessed at fetch time doesn't match what
+    // actually happened. Only branches/jumps can mispredict — a plain
+    // arithmetic instruction always has ex_predicted_taken=0 and
+    // ex_actual_taken=0, so this naturally stays false for non-control
+    // instructions without needing a separate check.
+    wire ex_mispredicted = ex_branch_or_jump_resolved &&
+                            (ex_predicted_taken != ex_actual_taken);
+
+    // flush: only needed on an actual misprediction now — if we correctly
+    // predicted taken (or correctly predicted not-taken), the pipeline
+    // already has the right instructions in flight and doesn't need
+    // correcting.
+    assign flush = ex_mispredicted;
+
+    // The CORRECT next PC, used only when flush is asserted (misprediction
+    // recovery) — supplies the real destination, overriding whatever the
+    // (wrong) speculative fetch chose.
+    assign ex_next_pc = ex_actual_taken ? ex_branch_target : ex_pc_plus_4;
 
     // NOTE: because branch/jump resolution happens in EX (2 stages after
     // fetch), the instructions fetched in the meantime (while the branch

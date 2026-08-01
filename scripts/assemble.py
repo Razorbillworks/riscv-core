@@ -96,11 +96,38 @@ if __name__ == "__main__":
         add(3, 2, 2),   # immediately depends on lw's result
     ]
 
+    # LOOP program: demonstrates branch prediction actually paying off.
+    # A real loop, executed multiple times, so the SAME branch is resolved
+    # repeatedly — letting BTB/gshare learn the pattern and predict
+    # correctly on later iterations (only mispredicting on the very first
+    # encounter, and on the final loop-exit transition).
+    #
+    #   x1 = 0        (counter)
+    #   x2 = 5        (loop limit)
+    # loop:              (address 0x08)
+    #   addi x1, x1, 1      ; x1++
+    #   slt  x3, x1, x2     ; x3 = (x1 < x2) ? 1 : 0
+    #   beq  x3, x0, exit   ; if x3==0 (x1>=x2), exit loop (0x10 -> 0x18, offset=8)
+    #   beq  x0, x0, loop   ; jump back to loop start (0x14 -> 0x08, offset=-12)
+    # exit:               (address 0x18)
+    #   addi x4, x0, 42     ; marker: loop finished correctly
+    loop_program = [
+        addi(1, 0, 0),      # 0x00: x1 = 0
+        addi(2, 0, 5),      # 0x04: x2 = 5
+        addi(1, 1, 1),      # 0x08: loop: x1 = x1 + 1
+        slt(3, 1, 2),       # 0x0C: x3 = (x1 < x2)
+        beq(3, 0, 8),       # 0x10: if x3==0, branch to exit (0x18)
+        beq(0, 0, -12),     # 0x14: jump back to loop (0x08)
+        addi(4, 0, 42),     # 0x18: exit: marker
+    ]
+
     which = sys.argv[2] if len(sys.argv) > 2 else "original"
     if which == "hazard":
         program_to_use = hazard_program
     elif which == "loaduse":
         program_to_use = loaduse_program
+    elif which == "loop":
+        program_to_use = loop_program
     else:
         program_to_use = program
 
