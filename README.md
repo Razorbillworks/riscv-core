@@ -28,19 +28,19 @@ predictor actually cost in gates and timing."
 - [x] 5-stage pipeline conversion
 - [x] Hazard detection + stalling
 - [x] Forwarding
-- [ ] Gshare branch predictor (RTL)
+- [x] Gshare branch predictor (RTL)
 - [ ] Perceptron branch predictor (RTL)
 - [ ] Synthesis + gate count/timing comparison
 
-Note: the pipeline is now functionally correct - forwarding, load-use
-stalling, and branch flush are all implemented and verified. Three test
-programs (branches + arithmetic, a tight back-to-back data-dependency
-chain, and a load immediately followed by a dependent instruction) all
-produce results matching the single-cycle CPU exactly. Two subtle bugs
-were found and fixed along the way: a same-cycle register file write/read
-race, and store instructions not using the forwarded value for the data
-being written. Next: branch predictors (gshare, then perceptron) and a
-synthesis-based comparison.
+Note: gshare + BTB are now fully integrated into the pipeline as real
+speculative branch prediction — fetch guesses a target early using the
+BTB's cached address and gshare's taken/not-taken prediction, and only
+flushes on an actual misprediction (not on every taken branch like the
+earlier version). All 4 test programs pass, including a real 5-iteration
+loop that completes in 37 cycles — this cycle count is the baseline
+we'll compare against once the perceptron predictor is built. Next:
+perceptron predictor (RTL), then a synthesis-based comparison of gshare
+vs perceptron (gate count, timing, and cycle count on the same programs).
 
 ## Instruction subset
 
