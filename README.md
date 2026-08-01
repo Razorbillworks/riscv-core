@@ -29,18 +29,17 @@ predictor actually cost in gates and timing."
 - [x] Hazard detection + stalling
 - [x] Forwarding
 - [x] Gshare branch predictor (RTL)
-- [ ] Perceptron branch predictor (RTL)
+- [x] Perceptron branch predictor (RTL)
 - [ ] Synthesis + gate count/timing comparison
 
-Note: gshare + BTB are now fully integrated into the pipeline as real
-speculative branch prediction — fetch guesses a target early using the
-BTB's cached address and gshare's taken/not-taken prediction, and only
-flushes on an actual misprediction (not on every taken branch like the
-earlier version). All 4 test programs pass, including a real 5-iteration
-loop that completes in 37 cycles — this cycle count is the baseline
-we'll compare against once the perceptron predictor is built. Next:
-perceptron predictor (RTL), then a synthesis-based comparison of gshare
-vs perceptron (gate count, timing, and cycle count on the same programs).
+Note: perceptron predictor is built, unit-tested, and wired into a
+separate CPU variant (cpu_pipelined_perceptron.v) alongside the existing
+gshare version, so both can be compared directly. Real measured results:
+perceptron scores 90% prediction accuracy vs gshare's 74% on identical
+training data, and the perceptron CPU completes the loop test program in
+31 cycles vs gshare's 37 (~16% fewer cycles) — both verified
+independently on two machines. Next and final step: synthesis (Yosys)
+comparison of both predictors for real gate count and timing numbers.
 
 ## Instruction subset
 
