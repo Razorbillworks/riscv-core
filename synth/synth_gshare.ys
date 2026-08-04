@@ -1,0 +1,28 @@
+# synth_gshare.ys
+# Synthesizes gshare_predictor.v to a generic gate-level netlist and
+# reports cell counts / area estimate. Uses Yosys's built-in generic cell
+# library (not a real fab's standard cell library) — this gives us a fair,
+# consistent basis for COMPARING gshare vs perceptron against each other,
+# even though the absolute numbers wouldn't match a specific real chip
+# process. That comparison (not the absolute numbers) is what matters for
+# this project's question.
+
+read_verilog ../rtl/gshare_predictor.v
+hierarchy -check -top gshare_predictor
+
+# Generic synthesis flow: convert behavioral Verilog (always blocks, etc.)
+# down to a generic technology-independent gate-level netlist.
+proc
+opt
+memory
+opt
+techmap
+opt
+
+# Report: cell counts by type, and an overall summary (gate count is what
+# we mainly care about for the area/cost comparison).
+stat
+
+# Also write out the synthesized netlist, in case we want to inspect it
+# later or run further analysis (e.g. actual timing with an STA tool).
+write_verilog synth_gshare_netlist.v

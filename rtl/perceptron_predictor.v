@@ -57,18 +57,21 @@ module perceptron_predictor #(
         global_history = {HISTORY_BITS{1'b0}};
     end
 
+    // Accumulator width: sized to comfortably hold the real range, not a
+    // full 32 bits. With HISTORY_BITS weights (plus bias) each up to
+    // WEIGHT_WIDTH bits, the maximum possible magnitude is roughly
+    // (HISTORY_BITS+1) * 2^(WEIGHT_WIDTH-1). We add a few guard bits on
+    // top of the minimum needed and cap it well below 32 — using a full
+    // 32-bit accumulator here (as an earlier version of this file did)
+    // needlessly inflated gate count in synthesis, since every extra bit
+    // of accumulator width means a wider adder chain replicated across
+    // every table entry.
+    localparam ACC_WIDTH = WEIGHT_WIDTH + 6; // generous headroom, still far narrower than 32 bits
+
     wire [INDEX_BITS-1:0] predict_index = pc[INDEX_BITS+1:2];
 
     // --- Prediction: compute the weighted sum combinationally ---
-    // Using an explicit always @(*) block (rather than a function called
-    // from a continuous assignment) to compute this — some simulators
-    // don't reliably re-trigger a `wire = function(...)` assignment when
-    // the function reads a module-level array like `weights` that isn't
-    // one of its passed-in arguments, even though the array read should
-    // logically be part of its sensitivity. An explicit always @(*) block
-    // sidesteps that entirely and is the more standard synthesizable style
-    // anyway.
-    reg signed [31:0] predict_sum;
+    reg signed [ACC_WIDTH-1:0] predict_sum;
     integer k;
     always @(*) begin
         predict_sum = weights[predict_index][HISTORY_BITS]; // start with bias
@@ -85,7 +88,7 @@ module perceptron_predictor #(
     // --- Update ---
     wire [INDEX_BITS-1:0] update_index = update_pc[INDEX_BITS+1:2];
 
-    reg signed [31:0] update_sum;
+    reg signed [ACC_WIDTH-1:0] update_sum;
     integer m;
     always @(*) begin
         update_sum = weights[update_index][HISTORY_BITS];

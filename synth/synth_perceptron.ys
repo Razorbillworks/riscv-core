@@ -1,0 +1,17 @@
+# synth_perceptron.ys
+# Same synthesis flow as synth_gshare.ys, applied to the perceptron
+# predictor, for a direct, fair comparison.
+
+read_verilog ../rtl/perceptron_predictor.v
+hierarchy -check -top perceptron_predictor
+
+proc
+opt
+memory
+opt
+techmap
+opt
+
+stat
+
+write_verilog synth_perceptron_netlist.v
