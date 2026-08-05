@@ -30,16 +30,24 @@ predictor actually cost in gates and timing."
 - [x] Forwarding
 - [x] Gshare branch predictor (RTL)
 - [x] Perceptron branch predictor (RTL)
-- [ ] Synthesis + gate count/timing comparison
+- [x] Synthesis + gate count / timing comparison
 
-Note: perceptron predictor is built, unit-tested, and wired into a
-separate CPU variant (cpu_pipelined_perceptron.v) alongside the existing
-gshare version, so both can be compared directly. Real measured results:
-perceptron scores 90% prediction accuracy vs gshare's 74% on identical
-training data, and the perceptron CPU completes the loop test program in
-31 cycles vs gshare's 37 (~16% fewer cycles) — both verified
-independently on two machines. Next and final step: synthesis (Yosys)
-comparison of both predictors for real gate count and timing numbers.
+Note: project complete. Full comparison across three metrics, gshare vs
+perceptron, both fully integrated into working RTL CPUs:
+
+| Metric              | gshare | perceptron |
+|----------------------|--------|------------|
+| Prediction accuracy  | 74%    | 90%        |
+| Cycles (loop test)   | 37     | 31         |
+| Gate count (Yosys)   | ~7,400 | ~420,000   |
+
+Perceptron predicts better and runs faster, at a real and substantial
+hardware cost (~57x more gates) - see synth/SYNTHESIS_RESULTS.md for the
+full writeup, including why the gap is this large (not a coding mistake:
+verified by right-sizing the accumulator first, which barely changed the
+result). This is the real tradeoff branch predictor design has to
+navigate, and it's why simpler counter-based predictors like gshare
+remain common in practice despite being less accurate.
 
 ## Instruction subset
 
